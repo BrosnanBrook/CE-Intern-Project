@@ -8,7 +8,8 @@ from PySide6 import QtCore, QtWidgets, QtGui
 import sys
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(
+            self):
         super().__init__()
         self.setWindowTitle("Volume Viewer")
         self.resize(700, 500)
@@ -18,15 +19,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.viewer = SliceViewerWidget(self.volume_data)
         self.setCentralWidget(self.viewer)
 
-        
-
 class SliceViewerWidget(QtWidgets.QWidget):
-    def __init__(self, volume_data):
+    def __init__(
+            self, volume_data):
         super().__init__()
         self.current_qimage = None
         self.current_slice = None
         self.volume_data = volume_data
         self.current_axis = "Axial"
+        
+        self._status = QtWidgets.QErrorMessage()
+
+        self.refresh_pixmap()
 
         self.slice_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.slice_slider.valueChanged.connect(self.update_slice)
@@ -37,6 +41,7 @@ class SliceViewerWidget(QtWidgets.QWidget):
 
         self.button_raw = QtWidgets.QPushButton("Import Volume (raw)")
         self.button_vtk = QtWidgets.QPushButton("Import Volume (vtk)")
+        self.button_rng = QtWidgets.QPushButton("Generate Random Volume")
         self.text = QtWidgets.QLabel("Orthogonal View",
                                      alignment=QtCore.Qt.AlignmentFlag.AlignBottom)
         #self.original_pixmap = QtGui.QPixmap.fromImage(qimage)
@@ -50,29 +55,32 @@ class SliceViewerWidget(QtWidgets.QWidget):
         self.layout.addWidget(self.image_label, stretch=1)
         self.layout.addWidget(self.button_raw)
         self.layout.addWidget(self.button_vtk)
+        self.layout.addWidget(self.button_rng)
         self.layout.addWidget(self.axis_combo)
         self.layout.addWidget(self.slice_slider)
 
         self.button_raw.clicked.connect(self.import_volume_raw)
         self.button_vtk.clicked.connect(self.import_volume_vtk)
+        self.button_rng.clicked.connect(self.generate_random_volume)
 
-    def import_volume_raw(self):
+    def import_volume_raw(
+            self):
         print("Importing .raw volume...")
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open RAW Volume", "", "RAW Files (*.raw)")
         if not file_path:
             print("No file selected.")
             return
-        sx, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size X:", 256, 1)
+        self.volume_data._sx, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size X:", 256, 1)
         if not ok:
             return
-        sy, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size Y:", 256, 1)
+        self.volume_data._sy, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size Y:", 256, 1)
         if not ok:
             return
-        sz, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size Z:", 256, 1)
+        self.volume_data._sz, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size Z:", 256, 1)
         if not ok:
             return
-
-        dtype, ok = QtWidgets.QInputDialog.getItem(
+            
+        self.volume_data._dtype, ok = QtWidgets.QInputDialog.getItem(
             self,
             "RAW Data Type",
             "Select dtype:",
@@ -81,22 +89,31 @@ class SliceViewerWidget(QtWidgets.QWidget):
             False,
         )
         if not ok:
+            self._status.showMessage("RAW import cancelled.")
             return
         self.volume_data.load_raw(file_path)
+        print("RAW dtype:", self.volume_data.array.dtype)
+        print("RAW shape:", self.volume_data.array.shape)
+        print("RAW min/max:", self.volume_data.array.min(), self.volume_data.array.max())
+        print("RAW nonzero:", numpy.count_nonzero(self.volume_data.array))
+        self._status.showMessage("RAW volume imported successfully.")
         self.set_axis(self.axis_combo.currentText())
-                
-    def import_volume_vtk(self):
+                            
+    def import_volume_vtk(
+            self):
         print("Importing .vti volume...")
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open VTI Volume",
                                                              "", "VTI Files (*.vti)")
         if not file_path:
             print("No file selected.")
             return
-
+            
         self.volume_data.load_vti(file_path)
+        self._status.showMessage("VTI volume imported successfully.")   
         self.set_axis(self.axis_combo.currentText())
         
-    def set_axis(self, axis):
+    def set_axis(
+            self, axis):
         print(f"Axis changed to: {axis}")
         self.current_axis = axis
 
@@ -110,7 +127,8 @@ class SliceViewerWidget(QtWidgets.QWidget):
         self.slice_slider.setValue(middle_index)
         self.update_slice(middle_index)
 
-    def update_slice(self, index):
+    def update_slice(
+            self, index):
         print(f"Slice changed to: {index}")
         self.current_slice = index
 
@@ -123,6 +141,19 @@ class SliceViewerWidget(QtWidgets.QWidget):
         image = VolumeData.normalize_to_uint8(slice_2d)
         image = numpy.ascontiguousarray(image)
 
+        self.current_qimage = self.numpy_to_qimage(image)
+        self.refresh_pixmap()
+        
+        # At this point, slice_2d contains the 2D slice of the volume data
+        print(f"Extracted 2D slice shape: {slice_2d.shape}")
+        print(
+            "minimum:", slice_2d.min(),
+            "maximum:", slice_2d.max(),
+            "center value:", slice_2d[slice_2d.shape[0] // 2, slice_2d.shape[1] // 2]
+        )
+
+    def numpy_to_qimage(
+            self, image):
         height, width = image.shape
         bytes_per_line = image.strides[0]
 
@@ -134,13 +165,10 @@ class SliceViewerWidget(QtWidgets.QWidget):
             QtGui.QImage.Format.Format_Grayscale8,
         ).copy()
 
-        self.current_qimage = q_image
-        self.refresh_pixmap()
-        
-        # At this point, slice_2d contains the 2D slice of the volume data
-        print(f"Extracted 2D slice shape: {slice_2d.shape}")
+        return q_image
 
-    def refresh_pixmap(self):
+    def refresh_pixmap(
+            self):
         if self.current_qimage is None:
             return
 
@@ -155,10 +183,20 @@ class SliceViewerWidget(QtWidgets.QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.refresh_pixmap()
-        
+
+    def generate_random_volume(self):
+        self.volume_data._sx = 128
+        self.volume_data._sy = 128
+        self.volume_data._sz = 128
+        self.volume_data._dtype = numpy.float32
+        shape = (self.volume_data._sx, self.volume_data._sy, self.volume_data._sz)
+        self.volume_data.array = numpy.random.rand(*shape).astype(self.volume_data._dtype)
+
+        self.set_axis(self.axis_combo.currentText())
 
 class VolumeData:
-    def __init__(self):
+    def __init__(
+            self):
         self.array = None
         self.spacing = None
         self.origin = None
@@ -167,10 +205,14 @@ class VolumeData:
         self._sx = None
         self._sy = None
         self._sz = None
-        self._status = None
+
+    def is_loaded(
+            self):
+        return self.array is not None
 
     # Two separate loading functions, one for .raw files and one for .vti files (VTK)
-    def load_raw(self, file_path) -> None:
+    def load_raw(
+            self, file_path) -> None:
         path = file_path.strip()
         if not path:
             self._status.showMessage("Enter a file path.")
@@ -179,44 +221,51 @@ class VolumeData:
         if not p.exists():
             self._status.showMessage(f"File does not exist: {p}")
             return
-        shape = (self._sx.value(), self._sy.value(), self._sz.value())
-        dtype = numpy.dtype(self._dtype.currentText())
+        shape = (self._sx, self._sy, self._sz)
+        dtype = numpy.dtype(self._dtype)
+        print(f"Loading RAW file: {p}, shape: {shape}, dtype: {dtype}")
+
         try:
             self.array = numpy.memmap(str(p), dtype=dtype, mode="r", shape=shape)
         except Exception as exc:
             self._status.showMessage(f"Failed to load volume: {exc}")
             return
-
-
-    def load_vti(self, file_path) -> None:
+        
+        return
+        
+    def load_vti(
+            self, file_path) -> None:
         reader = vtk.vtkXMLImageDataReader()
         reader.SetFileName(file_path)
         reader.Update()
-
+    
         image_data = reader.GetOutput()
-
+        
         self.dimensions = image_data.GetDimensions()
         self.spacing = image_data.GetSpacing()
         self.origin = image_data.GetOrigin()
-
+        
         point_data = image_data.GetPointData()
         vtk_scalars = point_data.GetScalars()
-
+        
         if vtk_scalars is None:
             raise ValueError("VTI file does not contain voxel data.")
-
+        
         flat_array = vtk_to_numpy(vtk_scalars)
-
-        x_size = self.dimensions[0]
-        y_size = self.dimensions[1]
-        z_size = self.dimensions[2]
-
-        self.array = flat_array.reshape((z_size, y_size, x_size))
-
-        return self.array
+        
+        self._sx = self.dimensions[0]
+        self._sy = self.dimensions[1]
+        self._sz = self.dimensions[2]
+        
+        if flat_array.size != self._sx * self._sy * self._sz:
+            raise ValueError("VTI file dimensions do not match the expected size.")
+        self.array = flat_array.reshape((self._sz, self._sy, self._sx))
+    
+        return self.array 
 
     @staticmethod
-    def get_slice(volume, axis, index):
+    def get_slice(
+            volume, axis, index):
         if axis == "Axial":
             return volume[index, :, :]
         if axis == "Coronal":
@@ -226,7 +275,8 @@ class VolumeData:
         raise ValueError(f"Unknown axis: {axis}")
 
     @staticmethod
-    def get_max_slice_for_axis(volume, axis):
+    def get_max_slice_for_axis(
+            volume, axis):
         depth = volume.shape[0] 
         height = volume.shape[1]
         width = volume.shape[2]
@@ -240,13 +290,13 @@ class VolumeData:
         
         raise ValueError(f"Unknown axis: {axis}")
 
-
-    def get_middle_slice_for_axis(volume, axis):
+    def get_middle_slice_for_axis(
+            volume, axis):
         max_index = VolumeData.get_max_slice_for_axis(volume, axis)
         return max_index // 2
-    
 
-    def normalize_to_uint8(slice_2d):
+    def normalize_to_uint8(
+            slice_2d):
         min_val = slice_2d.min()
         max_val = slice_2d.max()
 
@@ -257,9 +307,9 @@ class VolumeData:
         image_8bit = normalized * 255
 
         return image_8bit.astype(numpy.uint8)
-    
 
-    def normalize_to_uint16(slice_2d):
+    def normalize_to_uint16(
+            slice_2d):
         min_val = slice_2d.min()
         max_val = slice_2d.max()
     
@@ -270,9 +320,9 @@ class VolumeData:
         image_16bit = normalized * 32767
     
         return image_16bit.astype(numpy.int16)
-    
 
-    def normalize_to_float32(slice_2d):
+    def normalize_to_float32(
+            slice_2d):
         min_val = slice_2d.min()
         max_val = slice_2d.max()
 
@@ -282,8 +332,7 @@ class VolumeData:
         image_32bit = (slice_2d - min_val) / (max_val - min_val)
 
         return image_32bit.astype(numpy.float32)
-
-
+    
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
