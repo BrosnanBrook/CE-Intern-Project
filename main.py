@@ -23,11 +23,13 @@ class MainWindow(QtWidgets.QMainWindow):
 class SliceViewerWidget(QtWidgets.QWidget):
     def __init__(self, volume_data):
         super().__init__()
+        self.current_qimage = None
+        self.current_slice = None
         self.volume_data = volume_data
-        self.current_axis = 0
+        self.current_axis = "Axial"
 
-        self.slice_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slice_slider.valueChanged.connect(self.change_slice)
+        self.slice_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.slice_slider.valueChanged.connect(self.update_slice)
 
         self.axis_combo = QtWidgets.QComboBox()
         self.axis_combo.addItems(["Axial", "Coronal", "Sagittal"])
@@ -36,11 +38,11 @@ class SliceViewerWidget(QtWidgets.QWidget):
         self.button_raw = QtWidgets.QPushButton("Import Volume (raw)")
         self.button_vtk = QtWidgets.QPushButton("Import Volume (vtk)")
         self.text = QtWidgets.QLabel("Orthogonal View",
-                                     alignment=QtCore.Qt.AlignBottom)
-        self.original_pixmap = QtGui.QPixmap.fromImage(qimage)
+                                     alignment=QtCore.Qt.AlignmentFlag.AlignBottom)
+        #self.original_pixmap = QtGui.QPixmap.fromImage(qimage)
 
         self.image_label = QtWidgets.QLabel()
-        self.image_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.image_label.setMinimumSize(1, 1)
 
         self.layout = QtWidgets.QVBoxLayout(self)
@@ -60,14 +62,37 @@ class SliceViewerWidget(QtWidgets.QWidget):
         if not file_path:
             print("No file selected.")
             return
+        sx, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size X:", 256, 1)
+        if not ok:
+            return
+        sy, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size Y:", 256, 1)
+        if not ok:
+            return
+        sz, ok = QtWidgets.QInputDialog.getInt(self, "RAW Dimensions", "Size Z:", 256, 1)
+        if not ok:
+            return
+
+        dtype, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "RAW Data Type",
+            "Select dtype:",
+            ["uint8", "uint16", "float32"],
+            0,
+            False,
+        )
+        if not ok:
+            return
         self.volume_data.load_raw(file_path)
+        self.set_axis(self.axis_combo.currentText())
                 
     def import_volume_vtk(self):
         print("Importing .vti volume...")
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open VTI Volume", "", "VTI Files (*.vti)")
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open VTI Volume",
+                                                             "", "VTI Files (*.vti)")
         if not file_path:
             print("No file selected.")
             return
+
         self.volume_data.load_vti(file_path)
         self.set_axis(self.axis_combo.currentText())
         
@@ -95,35 +120,41 @@ class SliceViewerWidget(QtWidgets.QWidget):
 
         slice_2d = VolumeData.get_slice(self.volume_data.array, self.current_axis, index)
 
-        if self.volume_data.format is None:
-            print("Volume format not specified.")
-            return
-        if self.volume_data.format is "uint8":
-            print("Volume format is uint8")
-            image = VolumeData.normalize_to_uint8(slice_2d)
-        if self.volume_data.format is "uint16":
-            print("Volume format is uint16")
-            image = VolumeData.normalize_to_uint16(slice_2d)
-        if self.volume_data.format is "float32":
-            print("Volume format is float32")
-            image = VolumeData.normalize_to_float32(slice_2d)
-
+        image = VolumeData.normalize_to_uint8(slice_2d)
         image = numpy.ascontiguousarray(image)
 
-        height = image.shape[0]
-        width = image.shape[1]
+        height, width = image.shape
         bytes_per_line = image.strides[0]
 
-        # We use .copy() here to keep the QImage valid after update_slice() is called
-        q_image = QtGui.QImage(image.data, width, height, 
-                               bytes_per_line, QtGui.QImage.Format_Grayscale8).copy()
-        pixmap = QtGui.QPixmap.fromImage(q_image)
-        self.image_label.setPixmap(pixmap.scaled(self.image_label.size(), 
-                                                 QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                                                 QtCore.Qt.TransformationMode.SmoothTransformation))
+        q_image = QtGui.QImage(
+            image.data,
+            width,
+            height,
+            bytes_per_line,
+            QtGui.QImage.Format.Format_Grayscale8,
+        ).copy()
+
+        self.current_qimage = q_image
+        self.refresh_pixmap()
         
         # At this point, slice_2d contains the 2D slice of the volume data
         print(f"Extracted 2D slice shape: {slice_2d.shape}")
+
+    def refresh_pixmap(self):
+        if self.current_qimage is None:
+            return
+
+        pixmap = QtGui.QPixmap.fromImage(self.current_qimage)
+        scaled = pixmap.scaled(
+            self.image_label.size(),
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        )
+        self.image_label.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_pixmap()
         
 
 class VolumeData:
@@ -136,6 +167,7 @@ class VolumeData:
         self._sx = None
         self._sy = None
         self._sz = None
+        self._status = None
 
     # Two separate loading functions, one for .raw files and one for .vti files (VTK)
     def load_raw(self, file_path) -> None:
@@ -171,7 +203,7 @@ class VolumeData:
         vtk_scalars = point_data.GetScalars()
 
         if vtk_scalars is None:
-            raise ValueError("No VTI file does not contain voxel data.")
+            raise ValueError("VTI file does not contain voxel data.")
 
         flat_array = vtk_to_numpy(vtk_scalars)
 
