@@ -17,29 +17,46 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.volume_data = VolumeData()
         self.viewer = SliceViewerWidget(self.volume_data)
-
+        self.viewer.setWindowTitle("Slice Viewer")
         
         self.viewer.setStyleSheet("""
-            QDockWidget {
-                background-color: #e6e9ef;
-                border: 1px solid blue;
-                color: #e6e9ef;
+            QDockWidget QPushButton {
+                background-color: #747b85;
+                border: 1px solid #8d949d;
+                border-radius: 3px;
+                color: #ffffff;
+                padding: 5px 8px;
             }
 
-            QLabel {
-                color: ##707f9c;
+            QDockWidget QPushButton:hover {
+                background-color: #858d97;
             }
 
-            QPushButton {
-                padding: 6px 10px;
-                border: 1px solid #474a4d;
-                border-radius: 4px;
-                background-color: #3a424f;
+            QDockWidget QPushButton:pressed {
+                background-color: #646b75;
             }
 
-            QPushButton:hover {
-                background-color: #4a5565;
+            QDockWidget QComboBox {
+                background-color: #747b85;
+                border: 1px solid #8d949d;
+                border-radius: 3px;
+                color: #ffffff;
+                padding: 5px 8px;
             }
+
+            QDockWidget QComboBox:hover {
+                background-color: #858d97;
+            }
+
+            QDockWidget QComboBox QAbstractItemView {
+                color: #ffffff;
+            }
+            
+            QDockWidget QComboBox:pressed {
+                background-color: #646b75;
+            }
+
+            
         """)
 
         self.scene = QtWidgets.QGraphicsScene(self)
@@ -139,9 +156,11 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
         self.current_slice = None
         self.volume_data = volume_data
         self.current_axis = "Axial"
+        self.setFeatures(QtWidgets.QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
 
         self.slice_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.slice_slider.valueChanged.connect(self.update_slice)
+        self.slice_slider.valueChanged.connect(self.update_slice_label)
 
         self.axis_combo = QtWidgets.QComboBox()
         self.axis_combo.addItems(["Axial", "Coronal", "Sagittal"])
@@ -159,26 +178,35 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
             box.setSingleStep(0.00001)
             box.setValue(1.0)
 
-        self.text = QtWidgets.QLabel("Orthogonal View",
-                                     alignment=QtCore.Qt.AlignmentFlag.AlignBottom)
         self.text_voxel_size = QtWidgets.QLabel(
             "Voxel Size: X, Y, Z",
-            alignment=QtCore.Qt.AlignmentFlag.AlignBottom
+            alignment=QtCore.Qt.AlignmentFlag.AlignTop
+        )
+
+        self.text_slider = QtWidgets.QLabel(
+            "Slice: ",
+            alignment=QtCore.Qt.AlignmentFlag.AlignTop
         )
 
         self.widget = QtWidgets.QWidget()
         self.setWidget(self.widget)
         self.layout = QtWidgets.QVBoxLayout(self.widget)
-        self.layout.addWidget(self.text)
         self.layout.addWidget(self.button_raw)
         self.layout.addWidget(self.button_vtk)
         self.layout.addWidget(self.button_rng)
         self.layout.addWidget(self.axis_combo)
+        self.layout.addWidget(self.text_slider)
         self.layout.addWidget(self.slice_slider)
         self.layout.addWidget(self.text_voxel_size)
         for box in [self.voxel_size_x, self.voxel_size_y, self.voxel_size_z]:
             self.layout.addWidget(box)
 
+        for widget in [self.button_raw, self.button_vtk, 
+                       self.button_rng, self.axis_combo, self.slice_slider, 
+                       self.text_voxel_size, self.voxel_size_x, self.voxel_size_y, 
+                       self.voxel_size_z, self.text_slider]:
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                 QtWidgets.QSizePolicy.Policy.Fixed)
 
         self.button_raw.clicked.connect(self.import_volume_raw)
         self.button_vtk.clicked.connect(self.import_volume_vtk)
@@ -186,6 +214,11 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
         self.voxel_size_x.valueChanged.connect(self.set_voxel_size)
         self.voxel_size_y.valueChanged.connect(self.set_voxel_size)
         self.voxel_size_z.valueChanged.connect(self.set_voxel_size)
+    
+
+    def update_slice_label(self, value):
+        self.text_slider.setText(f"Slice: {value}")
+
 
 
     def import_volume_raw(
