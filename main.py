@@ -20,18 +20,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         
         self.viewer.setStyleSheet("""
-            QWidget {
-                background-color: #2b3038;
+            QDockWidget {
+                background-color: #e6e9ef;
+                border: 1px solid blue;
                 color: #e6e9ef;
             }
 
             QLabel {
-                color: #e6e9ef;
+                color: ##707f9c;
             }
 
             QPushButton {
                 padding: 6px 10px;
-                border: 1px solid #596273;
+                border: 1px solid #474a4d;
                 border-radius: 4px;
                 background-color: #3a424f;
             }
@@ -42,10 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
 
         self.scene = QtWidgets.QGraphicsScene(self)
-        self.proxy = self.scene.addWidget(self.viewer)
-        self.proxy.setFlag(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-        self.proxy.setFlag(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-        self.proxy.setPos(20, 20)
+        
 
         self.image = GraphicsImage()
         self.scene.addItem(self.image)
@@ -61,6 +59,7 @@ class MainWindow(QtWidgets.QMainWindow):
         view.centerOn(self.image)
         self.viewer.adjustSize()
         self.setCentralWidget(view)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, self.viewer)
         
 
     @QtCore.Slot(QtGui.QImage, str)
@@ -96,13 +95,7 @@ class GraphicsView(QtWidgets.QGraphicsView):
         self.setResizeAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._pinned = False
-        self._empty = True
 
-    def reset_view(self, scale=1):
-        self.resetTransform()
-        self.scale(scale, scale)
-        self._zoom = 0
 
     def wheelEvent(
             self, event) -> None:
@@ -136,7 +129,7 @@ class GraphicsImage(QtWidgets.QGraphicsPixmapItem):
         self.setToolTip("Orthographic Slice")
 
 
-class SliceViewerWidget(QtWidgets.QWidget):
+class SliceViewerWidget(QtWidgets.QDockWidget):
     slice_ready = QtCore.Signal(QtGui.QImage, str)
 
     def __init__(
@@ -173,7 +166,9 @@ class SliceViewerWidget(QtWidgets.QWidget):
             alignment=QtCore.Qt.AlignmentFlag.AlignBottom
         )
 
-        self.layout = QtWidgets.QVBoxLayout(self)
+        self.widget = QtWidgets.QWidget()
+        self.setWidget(self.widget)
+        self.layout = QtWidgets.QVBoxLayout(self.widget)
         self.layout.addWidget(self.text)
         self.layout.addWidget(self.button_raw)
         self.layout.addWidget(self.button_vtk)
@@ -183,6 +178,7 @@ class SliceViewerWidget(QtWidgets.QWidget):
         self.layout.addWidget(self.text_voxel_size)
         for box in [self.voxel_size_x, self.voxel_size_y, self.voxel_size_z]:
             self.layout.addWidget(box)
+
 
         self.button_raw.clicked.connect(self.import_volume_raw)
         self.button_vtk.clicked.connect(self.import_volume_vtk)
