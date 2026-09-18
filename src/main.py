@@ -15,7 +15,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(
             self):
         super().__init__()
-        self.setWindowTitle("Volume Viewer")
+        self.setWindowTitle("VolSlicer")
         self.setWindowIcon(QtGui.QIcon(str(ICON_PATH)))
         self.resize(700, 500)
         self.setMinimumSize(700, 500)
