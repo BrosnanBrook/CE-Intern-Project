@@ -1,23 +1,31 @@
 import sys
 import numpy
 import vtk
+import math
 from pathlib import Path
 from vtkmodules.util import numpy_support
 vtk_to_numpy = numpy_support.vtk_to_numpy
 
 from PySide6 import QtCore, QtWidgets, QtGui
 
+ICON_PATH = Path(__file__).resolve().parent / "images" / "VolumeIcon.png"
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(
             self):
         super().__init__()
         self.setWindowTitle("Volume Viewer")
+        self.setWindowIcon(QtGui.QIcon(str(ICON_PATH)))
         self.resize(700, 500)
-        self.setMinimumSize(400, 300)
+        self.setMinimumSize(700, 500)
 
         self.volume_data = VolumeData()
         self.viewer = SliceViewerWidget(self.volume_data)
-        self.viewer.setWindowTitle("Slice Viewer")
+        self.viewer.setTitleBarWidget(QtWidgets.QWidget())
+        self._default_dock_width = 140
+        self._base_window_width = None
+        self._last_window_width = None
+        self._cumulative_scale = 1.0
         
         self.viewer.setStyleSheet("""
             QDockWidget QPushButton {
@@ -25,7 +33,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 border: 1px solid #8d949d;
                 border-radius: 3px;
                 color: #ffffff;
-                padding: 5px 8px;
+                padding: 2px 5px;
             }
 
             QDockWidget QPushButton:hover {
@@ -41,7 +49,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 border: 1px solid #8d949d;
                 border-radius: 3px;
                 color: #ffffff;
-                padding: 5px 8px;
+                padding: 2px 5px;
             }
 
             QDockWidget QComboBox:hover {
@@ -77,7 +85,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self.viewer.adjustSize()
         self.setCentralWidget(view)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, self.viewer)
-        
+        QtCore.QTimer.singleShot(0, self._record_base_sizes)
+
+
+    def _record_base_sizes(self) -> None:
+        self.resizeDocks(
+            [self.viewer], [self._default_dock_width], QtCore.Qt.Orientation.Horizontal
+        )
+        self._base_window_width = self.width()
+        self._last_window_width = self.width()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if self._base_window_width is None or self.width() == self._last_window_width:
+            return
+
+        scale_step = self.width() / self._last_window_width
+        dock_width = round(self.viewer.width() * scale_step)
+
+        self._cumulative_scale *= scale_step
+        self.viewer.apply_scale(self._cumulative_scale)
+        self.resizeDocks([self.viewer], [dock_width], QtCore.Qt.Orientation.Horizontal)
+        self._last_window_width = self.width()
 
     @QtCore.Slot(QtGui.QImage, str)
     def display_slice(self, image, axis):
@@ -132,7 +161,8 @@ class GraphicsView(QtWidgets.QGraphicsView):
             self.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
 
 class GraphicsImage(QtWidgets.QGraphicsPixmapItem):
-    def __init__(self):
+    def __init__(
+            self):
         super().__init__()
         self.setTransformationMode(QtCore.Qt.TransformationMode.SmoothTransformation)
         self.setFlags(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
@@ -157,6 +187,9 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
         self.volume_data = volume_data
         self.current_axis = "Axial"
         self.setFeatures(QtWidgets.QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self.widget = QtWidgets.QWidget()
+        self.setWidget(self.widget)
+        self.layout = QtWidgets.QVBoxLayout(self.widget)
 
         self.slice_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.slice_slider.valueChanged.connect(self.update_slice)
@@ -168,7 +201,7 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
 
         self.button_raw = QtWidgets.QPushButton("Import Volume (raw)")
         self.button_vtk = QtWidgets.QPushButton("Import Volume (vtk)")
-        self.button_rng = QtWidgets.QPushButton("Generate Random Volume")
+        self.button_rng = QtWidgets.QPushButton("Generate Mock Volume")
         self.voxel_size_x = QtWidgets.QDoubleSpinBox()
         self.voxel_size_y = QtWidgets.QDoubleSpinBox()
         self.voxel_size_z = QtWidgets.QDoubleSpinBox()
@@ -178,48 +211,96 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
             box.setSingleStep(0.00001)
             box.setValue(1.0)
 
-        self.text_voxel_size = QtWidgets.QLabel(
-            "Voxel Size: X, Y, Z",
-            alignment=QtCore.Qt.AlignmentFlag.AlignTop
-        )
+        self.text_voxel_dimensions = []
+
+        for axis in ["X", "Y", "Z"]:
+            label = QtWidgets.QLabel(
+                f"Axis: {axis}",
+                alignment=QtCore.Qt.AlignmentFlag.AlignTop
+            )
+            self.text_voxel_dimensions.append(label)
 
         self.text_slider = QtWidgets.QLabel(
-            "Slice: ",
+            "0",
             alignment=QtCore.Qt.AlignmentFlag.AlignTop
         )
 
-        self.widget = QtWidgets.QWidget()
-        self.setWidget(self.widget)
-        self.layout = QtWidgets.QVBoxLayout(self.widget)
-        self.layout.addWidget(self.button_raw)
-        self.layout.addWidget(self.button_vtk)
-        self.layout.addWidget(self.button_rng)
-        self.layout.addWidget(self.axis_combo)
-        self.layout.addWidget(self.text_slider)
-        self.layout.addWidget(self.slice_slider)
-        self.layout.addWidget(self.text_voxel_size)
-        for box in [self.voxel_size_x, self.voxel_size_y, self.voxel_size_z]:
-            self.layout.addWidget(box)
+        self.import_group = QtWidgets.QGroupBox("Import/Generate Volume")
+        self.import_layout = QtWidgets.QVBoxLayout(self.import_group)
+        self.import_layout.addWidget(self.button_raw)
+        self.import_layout.addWidget(self.button_vtk)
+        self.import_layout.addWidget(self.button_rng)
 
-        for widget in [self.button_raw, self.button_vtk, 
-                       self.button_rng, self.axis_combo, self.slice_slider, 
-                       self.text_voxel_size, self.voxel_size_x, self.voxel_size_y, 
-                       self.voxel_size_z, self.text_slider]:
-            widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
-                                 QtWidgets.QSizePolicy.Policy.Fixed)
+        self.axis_group = QtWidgets.QGroupBox("Axis")
+        self.axis_layout = QtWidgets.QVBoxLayout(self.axis_group)
+        self.axis_layout.addWidget(self.axis_combo)
+
+        self.slider_group = QtWidgets.QGroupBox("Slice")
+        self.slider_layout = QtWidgets.QVBoxLayout(self.slider_group)
+        self.slider_layout.addWidget(self.text_slider)
+        self.slider_layout.addWidget(self.slice_slider)
+
+        self.voxel_group = QtWidgets.QGroupBox("Voxel Size")
+        self.voxel_layout = QtWidgets.QVBoxLayout(self.voxel_group)
+
+        voxel_boxes = [self.voxel_size_x, self.voxel_size_y, self.voxel_size_z]
+        for label, box in zip(self.text_voxel_dimensions, voxel_boxes):
+            self.voxel_layout.addWidget(label)
+            self.voxel_layout.addWidget(box)
+
+        self.layout.addWidget(self.import_group)
+        self.layout.addWidget(self.axis_group)
+        self.layout.addWidget(self.slider_group)
+        self.layout.addWidget(self.voxel_group)
 
         self.button_raw.clicked.connect(self.import_volume_raw)
         self.button_vtk.clicked.connect(self.import_volume_vtk)
-        self.button_rng.clicked.connect(self.generate_random_volume)
+        self.button_rng.clicked.connect(self.generate_mock_volume)
         self.voxel_size_x.valueChanged.connect(self.set_voxel_size)
         self.voxel_size_y.valueChanged.connect(self.set_voxel_size)
         self.voxel_size_z.valueChanged.connect(self.set_voxel_size)
-    
 
-    def update_slice_label(self, value):
-        self.text_slider.setText(f"Slice: {value}")
+        self._scaled_layouts = [
+            self.layout, self.import_layout, self.axis_layout,
+            self.slider_layout, self.voxel_layout,
+        ]
+        self._base_margins = {
+            lay: lay.contentsMargins() for lay in self._scaled_layouts
+        }
+        self._base_spacing = {
+            lay: lay.spacing() for lay in self._scaled_layouts
+        }
 
+        self._font_widgets = [
+            self.import_group, self.axis_group, self.slider_group, self.voxel_group,
+            self.button_raw, self.button_vtk, self.button_rng,
+            self.axis_combo, self.text_slider, self.slice_slider,
+            self.voxel_size_x, self.voxel_size_y, self.voxel_size_z,
+            *self.text_voxel_dimensions,
+        ]
+        self._base_font_sizes = {
+            widget: widget.font().pointSizeF() for widget in self._font_widgets
+        }
 
+    def apply_scale(self, scale: float) -> None:
+        for lay in self._scaled_layouts:
+            base_margins = self._base_margins[lay]
+            lay.setContentsMargins(
+                round(base_margins.left() * scale),
+                round(base_margins.top() * scale),
+                round(base_margins.right() * scale),
+                round(base_margins.bottom() * scale),
+            )
+            lay.setSpacing(round(self._base_spacing[lay] * scale))
+
+        for widget, base_point_size in self._base_font_sizes.items():
+            font = widget.font()
+            font.setPointSizeF(max(1.0, base_point_size * scale))
+            widget.setFont(font)
+
+    def update_slice_label(
+            self, value):
+        self.text_slider.setText(f"{value}")
 
     def import_volume_raw(
             self) -> None:
@@ -289,7 +370,8 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
         self.set_axis(self.axis_combo.currentText())
 
     @staticmethod
-    def get_dimension(label):
+    def get_dimension(
+            label):
         dialog = QtWidgets.QInputDialog()
         dialog.setWindowFlag(QtCore.Qt.WindowType.Window, True)
         dialog.setWindowTitle("RAW Dimensions")
@@ -379,14 +461,15 @@ class SliceViewerWidget(QtWidgets.QDockWidget):
 
         return q_image
 
-    def generate_random_volume(
+    def generate_mock_volume(
             self) -> None:
-        self.volume_data._sx = 128
-        self.volume_data._sy = 128
-        self.volume_data._sz = 128
+        self.volume_data._sx = 100
+        self.volume_data._sy = 100
+        self.volume_data._sz = 100
         self.volume_data._dtype = numpy.float32
         shape = (self.volume_data._sz, self.volume_data._sy, self.volume_data._sx)
-        self.volume_data.array = numpy.random.rand(*shape).astype(self.volume_data._dtype)
+        self.volume_data.array = numpy.zeros(shape, dtype=self.volume_data._dtype)
+        self.volume_data.array[25:75, 25:75, 25:75] = 1
 
         self.set_axis(self.axis_combo.currentText())
 
@@ -515,6 +598,8 @@ class VolumeData:
         max_index = VolumeData.get_max_slice_for_axis(volume, axis)
         return max_index // 2
 
+
+    @staticmethod
     def normalize_to_uint8(
             slice_2d):
         min_val = slice_2d.min()
@@ -538,7 +623,19 @@ class VolumeData:
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(QtGui.QIcon(str(ICON_PATH)))
     window = MainWindow()
     window.show()
+
+    screen = app.primaryScreen()
+    if screen is not None:
+        available = screen.availableGeometry()
+        frame = window.frameGeometry()
+        frame.moveCenter(available.center())
+        if frame.top() < available.top():
+            frame.moveTop(available.top())
+        if frame.bottom() > available.bottom():
+            frame.moveBottom(available.bottom())
+        window.move(frame.topLeft())
 
     sys.exit(app.exec())
