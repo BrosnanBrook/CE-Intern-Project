@@ -12,8 +12,7 @@ from qt_graphics import GraphicsView, GraphicsImage
 ICON_PATH = Path(__file__).resolve().parent / "images" / "VolumeIcon.png"
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(
-            self):
+    def __init__(self):
         super().__init__()
         self.setWindowTitle("VolSlicer")
         self.setWindowIcon(QtGui.QIcon(str(ICON_PATH)))
